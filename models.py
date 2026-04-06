@@ -25,7 +25,7 @@ class Bookmark(SQLModel, table= True):
     """
     database model
     """
-    id: uuid.UUID= SQLField(default_factory=uuid.UUID, primary_key=True)
+    id: uuid.UUID= SQLField(default_factory=uuid.uuid4, primary_key=True)
     city: str= SQLField(index=True, min_length=1, max_length=99)
     country_code: str= SQLField(index=True, min_length=2, max_length=2)
     notes: str | None = SQLField(default=None,min_length=2, max_length=999)
@@ -42,7 +42,7 @@ class WeatherHistory(SQLModel, table=True):
     """
     Stores historical weather snapshots linked to a specific bookmark.
     """
-    id: uuid.UUID = SQLField(default_factory=uuid.UUID, primary_key=True)
+    id: uuid.UUID = SQLField(default_factory=uuid.uuid4, primary_key=True)
     bookmark_id: uuid.UUID = SQLField(foreign_key="bookmark.id", index=True)
     city: str = SQLField(index=True)
     country_code: str = SQLField(index=True)
@@ -53,7 +53,7 @@ class WeatherHistory(SQLModel, table=True):
     wind_speed: float
     units: Units
     fetched_at: datetime = SQLField(index=True, default_factory=lambda: datetime.now(UTC))
-    cached: bool
+    
 
 
 # ─────────────────────────────────────────────
@@ -83,7 +83,7 @@ class BookmarkBase(BaseModel):
 
     """
 
-    model_config: ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class BookmarkCreate(BookmarkBase):
@@ -152,9 +152,9 @@ class BookmarkAlertResponse(BaseModel):
     bookmark_id: uuid.UUID = Field(alias="bookmarkId")
     city: str
     threshold: float
-    current_temperature: float
+    current_temperature: float = Field(alias="currentTemperature")
     units: Units
-    alert_triggered: bool
+    alert_triggered: bool = Field(alias="alertTriggered")
     triggered_at: datetime | None = Field(alias="triggeredAt")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -191,4 +191,16 @@ class WeatherCompareItem(BaseModel):
 
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class WeatherHistoryListResponse(BaseModel):
+    """
+    Response model for paginated weather history
+    Includes the actual data and a cursor for the next page.
+    """
+    data: list[WeatherHistory]
+    next_cursor: datetime | None = Field(alias="nextCursor")
+
+    model_config = ConfigDict(populate_by_name=True)
+
 

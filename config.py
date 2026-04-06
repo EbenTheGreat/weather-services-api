@@ -1,5 +1,6 @@
-from  pydantic_settings import BaseSettings
+from  pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
+
 
 
 class Settings(BaseSettings):
@@ -7,9 +8,13 @@ class Settings(BaseSettings):
     CACHE_TTL_SECONDS: int
     RATE_LIMIT_MAX_REQUESTS: int
     RATE_LIMIT_WINDOW_SECONDS: int 
+    TIMEOUT: float
+    DATABASE_URL: str
 
-    class Config:
-        env_file_encoding="utf-8"
+    model_config = SettingsConfigDict(
+        env_file='.env',
+        env_file_encoding='utf-8'
+    )
 
 
 settings = Settings()
