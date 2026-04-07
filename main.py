@@ -1,4 +1,4 @@
-from db import create_db_and_tables
+#from db import create_db_and_tables
 from fastapi import FastAPI, status
 from router import v1
 from contextlib import asynccontextmanager
@@ -9,7 +9,7 @@ async def lifespan(app: FastAPI):
     """
     Create database tables on startup — runs once before the server starts accepting requests.
     """
-    create_db_and_tables()
+    #create_db_and_tables()
     yield
 
 

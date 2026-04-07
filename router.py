@@ -277,8 +277,38 @@ async def get_temperature_alerts(session: SessionDep):
     Checks all bookmarks with a set threshold
     Returns those whose temperatures exceed it.
     """
-    pass
+    statement = session.get(Bookmark).where(Bookmark.temperature_threshold.is_not(None))
+    bookmarks = session.exec(statement).all()
 
+    fetch_tasks = [asyncio.create_task(
+        api_service.get_weather_for_bookmark(
+            city= b.city,
+            country_code=b.country_code,
+            units=b.units
+        )
+    )
+        for b in bookmarks
+    ]
+
+    weather_results = asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+    alerts = []
+
+    for bookmark, result in zip(bookmarks, weather_results):
+        if isinstance(result, Exception):
+            continue
+        if result.temperature > bookmark.temperature_threshold:
+            alerts.append(
+                BookmarkAlertResponse(
+                    bookmark_id=str(bookmark.id),
+                    city=bookmark.city,
+                    threshold=bookmark.temperature_threshold,
+                    current_temperature=bookmark.current_temperature,
+                    message=f"Alert! current temperature ({result.temperature}°) is above your threshold"
+                )
+            )
+
+            return alerts
 
 
 @v1.get("/bookmarks/weather/bulk", status_code=status.HTTP_200_OK)

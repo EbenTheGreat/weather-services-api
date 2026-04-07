@@ -33,9 +33,9 @@ class Bookmark(SQLModel, table= True):
     created_at: datetime = SQLField(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = SQLField(default_factory=lambda: datetime.now(UTC))
 
-    #use alembic migrations for this data models in order to learn it
-    #is_favorite = SQLField(default= False)
-    #temperature_threshold: str | None = SQLField(default= None)
+    #use alembic migrations for this data models
+    is_favorite: bool = SQLField(default= False)
+    temperature_threshold: float | None = SQLField(default= None)
 
 
 class WeatherHistory(SQLModel, table=True):
@@ -111,8 +111,8 @@ class BookmarkUpdate(BaseModel):
     country_code: str | None = Field(default=None, min_length=2, max_length=2, alias="countryCode")
     notes: str | None = Field(default=None, min_length=2, max_length=999)
     units: Units | None = None
-    #temperature_threshold: float | None = Field(None, alias="temperatureThreshold", description="Alert threshold for temperature in degrees")
-    #is_favourite: bool | None = Field(None, alias="isFavourite", description="Mark as favourite")
+    temperature_threshold: float | None = Field(None, alias="temperatureThreshold", description="Alert threshold for temperature in degrees")
+    is_favourite: bool | None = Field(None, alias="isFavourite", description="Mark as favourite")
 
     model_config= ConfigDict(populate_by_name=True)
 
@@ -153,10 +153,7 @@ class BookmarkAlertResponse(BaseModel):
     city: str
     threshold: float
     current_temperature: float = Field(alias="currentTemperature")
-    units: Units
-    alert_triggered: bool = Field(alias="alertTriggered")
-    triggered_at: datetime | None = Field(alias="triggeredAt")
-
+    message: str
     model_config = ConfigDict(populate_by_name=True)
 
 

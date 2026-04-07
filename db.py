@@ -12,9 +12,9 @@ engine = create_engine(
 )
 
 
-def create_db_and_tables():
-    """Create all SQLModel table models in the Supabase database on startup."""
-    SQLModel.metadata.create_all(engine)
+#def create_db_and_tables():
+#    """Create all SQLModel table models in the Supabase database on startup."""
+#   SQLModel.metadata.create_all(engine)
 
 
 def get_session():
