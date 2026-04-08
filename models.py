@@ -1,3 +1,4 @@
+from asyncio import FIRST_EXCEPTION
 from sqlmodel import SQLModel, Field as SQLField
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator, ConfigDict
@@ -53,7 +54,7 @@ class WeatherHistory(SQLModel, table=True):
     wind_speed: float
     units: Units
     fetched_at: datetime = SQLField(index=True, default_factory=lambda: datetime.now(UTC))
-    
+
 
 
 # ─────────────────────────────────────────────
@@ -199,5 +200,4 @@ class WeatherHistoryListResponse(BaseModel):
     next_cursor: datetime | None = Field(alias="nextCursor")
 
     model_config = ConfigDict(populate_by_name=True)
-
 
