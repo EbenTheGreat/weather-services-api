@@ -1,6 +1,8 @@
 # 🌦️ Weather Bookmark API
 
-A production-ready REST API built with **FastAPI**, **SQLModel**, and **PostgreSQL** (Supabase) for managing city weather bookmarks. Features in-memory caching, per-IP rate limiting, concurrent weather fetching, weather history with cursor pagination, temperature alerts, and full schema migration via Alembic.
+A production-ready REST API built with **FastAPI**, **SQLModel**, and **PostgreSQL** (Supabase) for managing city weather bookmarks — now with an **AI-powered weather assistant** backed by Groq + pydantic-ai.
+
+Features in-memory caching, per-IP rate limiting, concurrent weather fetching, weather history with cursor pagination, temperature alerts, persistent AI chat sessions with full conversation history, and schema migration via Alembic.
 
 ---
 
@@ -16,6 +18,9 @@ A production-ready REST API built with **FastAPI**, **SQLModel**, and **PostgreS
 | HTTP Client | httpx (async) |
 | Settings | pydantic-settings |
 | Weather Data | OpenWeatherMap API |
+| AI Agent | pydantic-ai |
+| LLM Provider | Groq (`llama-3.3-70b-versatile`) |
+| AI Cache | fakeredis |
 
 ---
 
@@ -23,19 +28,25 @@ A production-ready REST API built with **FastAPI**, **SQLModel**, and **PostgreS
 
 ```
 weather-services-api/
-├── main.py              # FastAPI app entry point & lifespan
-├── router.py            # All API route handlers
-├── models.py            # SQLModel DB models + Pydantic request/response schemas
-├── weather_service.py   # WeatherApiService, WeatherCacheService, WeatherHistoryService
-├── db.py                # Engine, session factory, SessionDep
-├── config.py            # Settings loaded from .env via pydantic-settings
+├── main.py                  # FastAPI app entry point & lifespan
+├── router.py                # All weather/bookmark route handlers
+├── models.py                # SQLModel DB models + Pydantic request/response schemas
+├── weather_service.py       # WeatherApiService, WeatherCacheService, WeatherHistoryService
+├── db.py                    # Engine, session factory, SessionDep
+├── config.py                # Settings loaded from .env via pydantic-settings
+├── logging_config.py        # Structured logging setup
+├── ai_layer/
+│   ├── ai_models.py         # ChatSession, ChatMessage, AILog, request/response schemas
+│   ├── ai_routes.py         # /v1/ai/* route handlers
+│   ├── ai_service.py        # pydantic-ai Agent + all tool definitions
+│   └── orchestrator.py      # AIOrchestrator: caching, history, observability
 ├── alembic/
-│   ├── env.py           # Alembic migration environment
-│   ├── versions/        # Generated migration scripts
-│   └── script.py.mako   # Migration file template
-├── alembic.ini          # Alembic configuration
-├── .env                 # Environment variables (not committed)
-└── revelations.md       # Project lessons learned
+│   ├── env.py               # Alembic migration environment
+│   ├── versions/            # Generated migration scripts
+│   └── script.py.mako       # Migration file template
+├── alembic.ini              # Alembic configuration
+├── .env                     # Environment variables (not committed)
+└── revelations.md           # Project lessons & gotchas
 ```
 
 ---
@@ -55,7 +66,7 @@ source .venv/scripts/activate   # Windows (bash)
 ### 2. Install dependencies
 
 ```bash
-uv pip install fastapi sqlmodel alembic httpx fakeredis pydantic-settings psycopg2-binary
+uv pip install fastapi sqlmodel alembic httpx fakeredis pydantic-settings psycopg2-binary pydantic-ai groq
 ```
 
 ### 3. Configure environment variables
@@ -63,22 +74,26 @@ uv pip install fastapi sqlmodel alembic httpx fakeredis pydantic-settings psycop
 Create a `.env` file in the project root:
 
 ```env
-OPENWEATHER_API_KEY=your_api_key_here
+OPENWEATHER_API_KEY=your_openweather_key
 DATABASE_URL=postgresql://user:password@host:port/dbname
 CACHE_TTL_SECONDS=600
 RATE_LIMIT_MAX_REQUESTS=10
 RATE_LIMIT_WINDOW_SECONDS=60
 TIMEOUT=10.0
+GROQ_API_KEY=your_groq_api_key
+LLM_MODEL=groq:llama-3.3-70b-versatile
 ```
 
-> **Supabase tip:** Use the **Connection Pooler** URL (`aws-0-[region].pooler.supabase.com` on port `6543`) rather than the direct connection URL to avoid IPv6 resolution issues.
+> **Supabase tip:** Use the **Session Pooler** URL (`aws-0-[region].pooler.supabase.com` on port `6543`) rather than the direct connection URL to avoid IPv6 DNS resolution issues on local networks.
+>
+> **Supabase free tier:** Projects auto-pause after ~1 week of inactivity. If you get a DNS error on both URLs simultaneously, go to your [Supabase dashboard](https://supabase.com/dashboard) and click **Restore**.
 
 ### 4. Run database migrations
 
 Schema is fully managed by Alembic — never created at runtime.
 
 ```bash
-# First time setup (tables already exist from create_all):
+# First-time setup (if tables already exist from create_all):
 alembic revision -m "Initial baseline"
 alembic stamp head
 
@@ -89,7 +104,7 @@ alembic upgrade head
 ### 5. Start the server
 
 ```bash
-uvicorn main:app --reload
+fastapi dev main.py
 ```
 
 API docs available at: `http://localhost:8000/docs`
@@ -103,7 +118,7 @@ Schema changes are a deliberate CLI operation — the app never modifies the sch
 ### Daily workflow
 
 ```bash
-# 1. Edit your model in models.py
+# 1. Edit your model in models.py or ai_layer/ai_models.py
 # 2. Generate a migration
 alembic revision --autogenerate -m "describe your change"
 
@@ -121,9 +136,8 @@ alembic downgrade -1     # Roll back one migration
 alembic downgrade base   # Roll back all migrations
 ```
 
-> ⚠️ **Always review autogenerated migrations before applying.** When adding a non-nullable column to a table with existing rows, you must manually add `server_default` to the generated file:
+> ⚠️ **Always review autogenerated migrations before applying.** When adding a non-nullable column to a table with existing rows, manually add `server_default`:
 > ```python
-> # Fix: add server_default so existing rows get a value
 > op.add_column('bookmark', sa.Column('is_favorite', sa.Boolean(), server_default=sa.false(), nullable=False))
 > ```
 
@@ -189,7 +203,7 @@ All routes are prefixed with `/v1`.
 |---|---|---|
 | `GET` | `/v1/bookmarks/{id}/weather/history` | Paginated weather history for a bookmark |
 
-Uses **cursor-based pagination** — pass the `nextCursor` value from a response as the `cursor` query param on the next request.
+Uses **cursor-based pagination** — pass `nextCursor` from a response as the `cursor` query param on the next request.
 
 | Param | Type | Description |
 |---|---|---|
@@ -215,6 +229,57 @@ Uses **cursor-based pagination** — pass the `nextCursor` value from a response
 
 ---
 
+### 🤖 AI Chat
+
+Conversational AI weather assistant powered by **Groq** and **pydantic-ai**. The agent has access to your saved bookmarks, live weather data, temperature alerts, and historical trends.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/v1/ai/chat` | Send a message to the AI weather assistant |
+| `DELETE` | `/v1/ai/chat/{session_id}` | Clear conversation history for a session |
+
+#### `POST /v1/ai/chat`
+
+**Request body:**
+
+```json
+{
+  "prompt": "Which of my bookmarked cities is the hottest right now?",
+  "sessionId": "optional-uuid-to-continue-a-conversation"
+}
+```
+
+- **Omit `sessionId`** to start a new conversation — a new UUID is returned in the response.
+- **Include `sessionId`** from a previous response to continue the conversation with full history.
+
+**Response:**
+
+```json
+{
+  "reply": "Lagos is currently the hottest at 34°C...",
+  "sessionId": "b87b2524-096c-4f22-903e-c9ff4476aff4"
+}
+```
+
+**What the AI can do:**
+
+- List your saved bookmarks
+- Fetch live or cached weather for any city
+- Check which bookmarks are currently exceeding their temperature threshold
+- Compare weather across multiple cities concurrently
+- Analyse historical temperature trends and anomalies
+- Answer follow-up questions using full conversation context
+
+**Error responses:**
+
+| Code | Meaning |
+|---|---|
+| `200` | Successful AI response |
+| `422` | Invalid request (e.g. empty prompt) |
+| `503` | AI service temporarily unavailable — retry with the same `sessionId` |
+
+---
+
 ## 🏛️ Architecture
 
 ### Service Layer
@@ -224,12 +289,39 @@ Uses **cursor-based pagination** — pass the `nextCursor` value from a response
 | `WeatherCacheService` | fakeredis-backed Cache-Aside pattern + per-IP rate limiting |
 | `WeatherApiService` | httpx async calls to OpenWeatherMap, orchestrates cache reads/writes |
 | `WeatherHistoryService` | Persists weather snapshots to DB, provides cursor-paginated reads |
+| `AIOrchestrator` | Manages agent execution, Redis response caching, DB history persistence, and observability logging |
+
+### AI Layer
+
+```
+POST /v1/ai/chat
+       │
+       ▼
+  AIOrchestrator.handle_chat()
+       │
+       ├─ 1. Check Redis cache (prompt hash → cached reply)
+       │
+       ├─ 2. Load conversation history from PostgreSQL (ChatMessage)
+       │
+       ├─ 3. Run pydantic-ai Agent (Groq LLM)
+       │         │
+       │         ├─ Tool: get_my_bookmarks       → DB query
+       │         ├─ Tool: get_weather_for_city   → Cache-Aside → OpenWeather API
+       │         ├─ Tool: check_temperature_alerts → concurrent weather fetches
+       │         └─ Tool: get_weather_trends     → historical DB analysis
+       │
+       ├─ 4. Save new messages to PostgreSQL (ChatMessage)
+       │
+       ├─ 5. Log execution to PostgreSQL (AILog) — latency, tokens, tools used
+       │
+       └─ 6. Cache response in Redis → return reply
+```
 
 ### Caching (Cache-Aside)
 
 ```
 Request → Check fakeredis → HIT: return cached data (cached: true)
-                          → MISS: call OpenWeather API → store in cache → return data (cached: false)
+                          → MISS: call OpenWeather API → store in cache → return (cached: false)
 ```
 
 Cache TTL is controlled by `CACHE_TTL_SECONDS` in `.env` (default: 600s / 10 min).
@@ -275,6 +367,35 @@ Per-IP rate limiting using atomic Redis `INCR` on a rolling time-window key. Ret
 | `units` | Units enum | |
 | `fetched_at` | datetime | Indexed (used as cursor) |
 
+### `ChatSession` (DB table)
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | UUID | Primary key |
+| `created_at` | datetime | UTC, auto-set |
+| `updated_at` | datetime | UTC, auto-set |
+
+### `ChatMessage` (DB table)
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | UUID | Primary key |
+| `session_id` | UUID | FK → `chatsession.id`, indexed |
+| `message_json` | str | Serialised pydantic-ai `ModelMessage` list |
+| `created_at` | datetime | UTC, auto-set |
+
+### `AILog` (DB table — observability)
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | UUID | Primary key |
+| `session_id` | str | Indexed |
+| `prompt` | str | Truncated to 5000 chars |
+| `tools_used` | str \| None | JSON list of tool names invoked |
+| `response_time_ms` | float | Agent wall-clock duration |
+| `token_usage` | int \| None | Total tokens consumed |
+| `created_at` | datetime | UTC, auto-set |
+
 ---
 
 ## 🔑 Environment Variables
@@ -282,11 +403,13 @@ Per-IP rate limiting using atomic Redis `INCR` on a rolling time-window key. Ret
 | Variable | Required | Description |
 |---|---|---|
 | `OPENWEATHER_API_KEY` | ✅ | Your OpenWeatherMap API key |
-| `DATABASE_URL` | ✅ | PostgreSQL connection string |
+| `DATABASE_URL` | ✅ | PostgreSQL connection string (use pooler URL for Supabase) |
 | `CACHE_TTL_SECONDS` | ✅ | Weather cache lifetime in seconds |
 | `RATE_LIMIT_MAX_REQUESTS` | ✅ | Max requests per window per IP |
 | `RATE_LIMIT_WINDOW_SECONDS` | ✅ | Rate limit rolling window duration |
 | `TIMEOUT` | ✅ | HTTP timeout for OpenWeather calls (seconds) |
+| `GROQ_API_KEY` | ✅ | Your Groq API key (get one free at console.groq.com) |
+| `LLM_MODEL` | ✅ | pydantic-ai model string, e.g. `groq:llama-3.3-70b-versatile` |
 
 ---
 
