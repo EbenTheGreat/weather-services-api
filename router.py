@@ -290,25 +290,28 @@ async def get_temperature_alerts(session: SessionDep):
         for b in bookmarks
     ]
 
-    weather_results = asyncio.gather(*fetch_tasks, return_exceptions=True)
+    weather_results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
 
     alerts = []
 
     for bookmark, result in zip(bookmarks, weather_results):
         if isinstance(result, Exception):
+            from ai_layer.ai_service import logger
+            logger.warning(f"Alert check failed for {bookmark.city}: {result}")
             continue
-        if result.temperature > bookmark.temperature_threshold:
+
+        if result.temperature >= bookmark.temperature_threshold:
             alerts.append(
                 BookmarkAlertResponse(
                     bookmark_id=str(bookmark.id),
                     city=bookmark.city,
                     threshold=bookmark.temperature_threshold,
-                    current_temperature=bookmark.current_temperature,
-                    message=f"Alert! current temperature ({result.temperature}°) is above your threshold"
+                    current_temperature=result.temperature,
+                    message=f"Alert! Current temperature ({result.temperature}°) is at or above your threshold ({bookmark.temperature_threshold}°)."
                 )
             )
 
-            return alerts
+    return alerts
 
 
 @v1.get("/bookmarks/weather/bulk", status_code=status.HTTP_200_OK)

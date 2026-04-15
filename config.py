@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     RATE_LIMIT_WINDOW_SECONDS: int 
     TIMEOUT: float
     DATABASE_URL: str
+    GROQ_API_KEY: str
+    LLM_MODEL: str
 
     model_config = SettingsConfigDict(
         env_file='.env',

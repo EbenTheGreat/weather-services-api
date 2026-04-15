@@ -1,6 +1,7 @@
 from config import settings
 from models import WeatherResponse, Units, WeatherHistory, Bookmark
 import httpx
+import json
 from datetime import datetime, UTC
 import fakeredis
 from sqlmodel import Session, select
@@ -8,9 +9,11 @@ import uuid
 from fastapi import HTTPException, status
 from db import SessionDep
 from config import settings
-import json
 import time
 from typing import Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 #________________________________#
@@ -42,6 +45,7 @@ class WeatherCacheService:
       Store a WeatherResponse in fakeredis with a TTL
       """
       key = self._cache_key(city, country_code, units)
+      logger.debug(f"Caching weather for {city}, {country_code} ({units.value})")
       self.cache.setex(key, self.CACHE_TTL, data.model_dump_json())
 
     def get_from_cache(self, city: str, country_code: str, units: Units) -> WeatherResponse | None:
@@ -52,9 +56,12 @@ class WeatherCacheService:
         cached_data = self.cache.get(key)
         
         if cached_data:
+          logger.info(f"Cache HIT for {city}, {country_code}")
           data = json.loads(cached_data)
           data["cached"] = True
           return WeatherResponse(**data)
+        
+        logger.info(f"Cache MISS for {city}, {country_code}")
         return None
 
 
@@ -92,6 +99,7 @@ class WeatherCacheService:
       if count > self.RATE_LIMIT_MAX_REQUESTS:
         ttl = self.cache.ttl(rate_key)
         ttl = ttl if ttl > 0 else self.RATE_LIMIT_WINDOW_SECONDS
+        logger.warning(f"Rate limit exceeded for IP: {client_ip}. Retry in {ttl}s")
         raise HTTPException(
           status_code=status.HTTP_429_TOO_MANY_REQUESTS,
           detail=f"Too many requests. Retry in {ttl}s",
@@ -125,18 +133,24 @@ class WeatherApiService:
     }
 
     async with httpx.AsyncClient() as client:
+      start_time = time.perf_counter()
       try:
         response = await client.get(self.Base_Url, params=params, timeout=settings.TIMEOUT)
+        duration = (time.perf_counter() - start_time) * 1000
+        logger.info(f"External API call to OpenWeather took {duration:.2f}ms")
         response.raise_for_status()
         data = response.json()
 
       except httpx.TimeoutException:
+        logger.error(f"Weather API timeout for {city}")
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="weather Api timeout")
       
       except httpx.HTTPStatusError as e:
+        logger.error(f"Weather API HTTP error {e.response.status_code} for {city}")
         raise HTTPException(status_code=e.response.status_code, detail=f"Weather API error: {e.response.status_code} {e.response.reason_phrase}")
 
-      except httpx.RequestError:
+      except httpx.RequestError as e:
+        logger.error(f"Weather API request error for {city}: {str(e)}")
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Weather API unavailable")
 
       return WeatherResponse(
