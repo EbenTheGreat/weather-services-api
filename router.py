@@ -277,7 +277,7 @@ async def get_temperature_alerts(session: SessionDep):
     Checks all bookmarks with a set threshold
     Returns those whose temperatures exceed it.
     """
-    statement = session.get(Bookmark).where(Bookmark.temperature_threshold.is_not(None))
+    statement = select(Bookmark).where(Bookmark.temperature_threshold.is_not(None))
     bookmarks = session.exec(statement).all()
 
     fetch_tasks = [asyncio.create_task(

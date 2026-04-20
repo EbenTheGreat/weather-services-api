@@ -113,7 +113,7 @@ class BookmarkUpdate(BaseModel):
     notes: str | None = Field(default=None, min_length=2, max_length=999)
     units: Units | None = None
     temperature_threshold: float | None = Field(None, alias="temperatureThreshold", description="Alert threshold for temperature in degrees")
-    is_favourite: bool | None = Field(None, alias="isFavourite", description="Mark as favourite")
+    is_favorite: bool | None = Field(None, alias="isFavourite", description="Mark as favourite")
 
     model_config= ConfigDict(populate_by_name=True)
 
